@@ -1,0 +1,132 @@
+#!/bin/sh
+#set -e     # Abort upon error
+#set -u     # Abort upon udefined variable
+#set -x     # Print every command
+#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+#######################################
+#   Description:
+#       Prepare live env
+#   Usage:
+#       ./prepare hostname
+#   Arguments:
+#        hostname (string): env to install
+#   Returns:
+#       0 upon success
+#       >=1 upon error
+#######################################
+main() {
+    # Check if $USAGE is respected
+    readonly USAGE='Usage: ./prepare hostname'
+    [ "$#" -ne 1 ] && err "Error: 1 argument(s) expected, $# received" && err "$USAGE" && return 1
+
+    # Arguments
+    readonly hostname="$1"
+    [ ! -f "env/$hostname.env" ] && err "Error: no env file was found for '$hostname'" && return 2
+
+    load_env
+    locale_update
+    setup_base
+    root_cp
+    env_replace
+
+    arch-chroot /mnt sh /root/arch_install/install
+}
+
+#######################################
+# Load env
+#######################################
+load_env() {
+    # Load general and specific .env
+    set -a; . env/env; set +a
+    set -a && . "env/$hostname.env" && set +a
+}
+
+
+#######################################
+# Updates locales and generate
+#######################################
+locale_update() {
+    # Keymap
+    [ ! -z "$AI_SYSTEM_KEYMAP" ] \
+        && loadkeys "$AI_SYSTEM_KEYMAP" \
+        && printf 'KEYMAP=%s\n' "$AI_SYSTEM_KEYMAP" > /etc/vconsole.conf
+
+    # Time
+    ln -sf "/usr/share/zoneinfo/$AI_SYSTEM_REGION" /etc/localtime
+    timedatectl set-ntp true
+    hwclock --systohc
+
+    # Locale
+    printf '' > /etc/locale.conf
+    for locale in LANGUAGE LANG LC_CTYPE LC_NUMERIC LC_TIME LC_MONETARY LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
+        printf '%s=en_US.utf8\n' "$locale" >> /etc/locale.conf
+    done
+    printf 'LC_COLLATE=C\n' >> /etc/locale.conf
+
+    # Continue if an alternative locale is provided
+    [ ! -z "$AI_SYSTEM_LOCALES_EXTRA" ] || return 0
+
+    sed -i "s/#$AI_SYSTEM_LOCALES_EXTRA/$AI_SYSTEM_LOCALES_EXTRA/" /etc/locale.gen
+    locale-gen
+
+    for locale in LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
+        sed -i "s/$locale=en_US.utf8/$locale=$AI_SYSTEM_LOCALES_EXTRA.utf8/" /etc/locale.conf
+    done
+}
+
+#######################################
+# Install base system
+#######################################
+setup_base() {
+    reflector $(for c in $AI_SYSTEM_MIRROR_COUNTRIES; do echo "--country $c"; done) --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
+    pacman -Sy
+
+    pacstrap /mnt base linux linux-firmware base-devel
+
+    genfstab -U /mnt > /mnt/etc/fstab
+    printf "$hostname" > /mnt/etc/hostname
+    vim /mnt/etc/hosts
+}
+
+#######################################
+# Copy files
+#######################################
+root_cp() {
+    for file in \
+        /etc/pacman.d/mirrorlist \
+        /etc/locale.conf \
+        /etc/locale.gen \
+        /etc/vconsole.conf; do
+        cp "$file" "/mtn$file"
+    done
+
+    ln -sf "/usr/share/zoneinfo/$AI_SYSTEM_REGION" /mnt/etc/localtime
+
+    # Copy all from ./home to ~
+    cp -af /root/arch_install/root/. /mnt
+}
+
+#######################################
+# Replace all placeholders in passed
+# files with AI_* values in env
+#######################################
+env_replace() {
+    SUBST_VARS=''
+    printenv | sed 's;=.*;;' | grep "$PREFIX" | while read var; do
+        SUBST_VARS="$SUBST_VARS$var "
+    done
+
+    find root/ -type f | grep -E -v '(svg|jpg|asc|pub)$' | while read f; do
+        file="$(echo "$f" | cut -d'/' -f2-)"
+        envsubst "$(printf '${%s} ' $SUBST_VARS)" < "$f" > "/mtn/$file" 
+    done
+}
+
+#######################################
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
+#######################################
+err() { echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2; }
+
+main "$@"; exit

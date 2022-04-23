@@ -1,0 +1,66 @@
+#!/bin/sh
+set -e      # Abort upon error
+set -u      # Abort upon udefined variable
+set -x      # Print every command
+#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+#######################################
+#   Description:
+#       Setup Arch USB installation medium
+#   Usage:
+#       ./setup_usb dev
+#   Arguments:
+#        dev (string): Path to USB device (Ex: /dev/sda)
+#   Returns:
+#       0 upon success
+#       >=1 upon error
+#######################################
+main() {
+    # Check if $USAGE is respected
+    readonly USAGE='Usage: ./setup_usb hostname dev'
+    [ "$#" -ne 1 ] && err "Error: 1 argument(s) expected, $# received" && err "$USAGE" && return 1
+    [ "$(id -u)" -eq 0 ] && err 'Error: Please do NOT run as root' && return 2
+
+    # Parameters
+    readonly dev="$1"
+    readonly tmp="$(mktemp -d)"
+
+    iso_fetch
+	iso_write
+}
+
+# Fetch iso and verify
+iso_fetch() {
+	# Get sha1sums and latest iso's filename
+	curl https://mirror.archlinux.no/iso/latest/sha1sums.txt | grep -v bootstrap > "$tmp/sha1sums.txt"
+	readonly latest="$(cut -d' ' -f3 $tmp/sha1sums.txt)"
+
+	# Download iso and check sha1sums
+	curl -O --output-dir "$tmp" "https://mirror.archlinux.no/iso/latest/$latest"
+
+	cd "$tmp"
+	if ! sha1sum --check "$tmp/sha1sums.txt"; then
+		err "Error: checksum failed"
+		return 3
+	fi
+}
+
+# Write iso to device
+iso_write() {
+	# Prepare USB device
+	sudo wipefs --all --force "$dev"
+	cat "$tmp/$latest" | sudo tee "$dev" >/dev/null
+	sync
+
+	# Clean up
+	rm -rf "$tmp"
+}
+
+#######################################
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
+#######################################
+err() { echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2; }
+
+main "$@"; exit
+

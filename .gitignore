@@ -1,0 +1,5 @@
+*.code-workspace
+*.password
+latest.*.csv
+api.key
+key_collection.pub
