@@ -1,6 +1,6 @@
 #!/bin/sh
-#set -e     # Abort upon error
-#set -u     # Abort upon udefined variable
+set -e     # Abort upon error
+set -u     # Abort upon udefined variable
 #set -x     # Print every command
 #set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
 
@@ -18,11 +18,11 @@
 main() {
     # Check if $USAGE is respected
     readonly USAGE='Usage: ./prepare hostname'
-    [ "$#" -ne 1 ] && err "Error: 1 argument(s) expected, $# received" && err "$USAGE" && return 1
+    [ "$#" -eq 1 ] || { err "Error: 1 argument(s) expected, $# received"; err "$USAGE"; return 1; }
 
     # Arguments
     readonly hostname="$1"
-    [ ! -f "env/$hostname.env" ] && err "Error: no env file was found for '$hostname'" && return 2
+    [ -f "env/$hostname.env" ] || { err "Error: no env file was found for hostname '$hostname'"; return 2; }
 
     load_env
     locale_update
@@ -30,7 +30,7 @@ main() {
     root_cp
     env_replace
 
-    arch-chroot /mnt sh /root/arch_install/install
+    arch-chroot /mnt sh /root/arch_install/chroot
 }
 
 #######################################
@@ -48,9 +48,10 @@ load_env() {
 #######################################
 locale_update() {
     # Keymap
-    [ ! -z "$AI_SYSTEM_KEYMAP" ] \
-        && loadkeys "$AI_SYSTEM_KEYMAP" \
-        && printf 'KEYMAP=%s\n' "$AI_SYSTEM_KEYMAP" > /etc/vconsole.conf
+    if [ ! -z "$AI_SYSTEM_KEYMAP" ]; then
+        loadkeys "$AI_SYSTEM_KEYMAP"
+        printf 'KEYMAP=%s\n' "$AI_SYSTEM_KEYMAP" > /etc/vconsole.conf
+    fi
 
     # Time
     ln -sf "/usr/share/zoneinfo/$AI_SYSTEM_REGION" /etc/localtime
@@ -117,9 +118,10 @@ env_replace() {
         SUBST_VARS="$SUBST_VARS$var "
     done
 
-    find root/ -type f | grep -E -v '(svg|jpg|asc|pub)$' | while read f; do
-        file="$(echo "$f" | cut -d'/' -f2-)"
-        envsubst "$(printf '${%s} ' $SUBST_VARS)" < "$f" > "/mtn/$file" 
+    find /root/arch_install/root/ -type f | while read f; do
+        envsubst "$(printf '${%s} ' $SUBST_VARS)" \
+            < "$f" \
+            > "/mtn/$(echo "$f" | cut -d'/' -f5-)"
     done
 }
 

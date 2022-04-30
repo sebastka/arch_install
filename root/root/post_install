@@ -1,0 +1,45 @@
+#!/bin/sh
+set -e     # Abort upon error
+set -u     # Abort upon udefined variable
+#set -x     # Print every command
+#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+#######################################
+#   Description:
+#       Install arch - Post install
+#   Usage:
+#       ./post_install
+#   Arguments:
+#        None
+#   Returns:
+#       0 upon success
+#       >=1 upon error
+#######################################
+main() {
+    # Check if $USAGE is respected
+    readonly USAGE='Usage: ./post_install'
+    [ "$#" -eq 0 ] || { err "Error: 0 argument(s) expected, $# received"; err "$USAGE"; return 1; }
+
+    
+}
+
+dotfiles_deploy() {
+    git clone '${AI_USER_DOTFILES}'
+}
+
+#######################################
+# Load env
+#######################################
+load_env() {
+    # Load general and specific .env
+    set -a; . env/env; set +a
+    set -a && . "env/$hostname.env" && set +a
+}
+
+#######################################
+#   Print error message to stderr
+#   https://google.github.io/styleguide/shellguide.html
+#######################################
+err() { echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2; }
+
+main "$@"; exit

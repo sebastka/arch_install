@@ -1,14 +1,14 @@
 #!/bin/sh
-#set -e     # Abort upon error
-#set -u     # Abort upon udefined variable
+set -e     # Abort upon error
+set -u     # Abort upon udefined variable
 #set -x     # Print every command
 #set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
 
 #######################################
 #   Description:
-#       Install arch
+#       Continue installation in chrooted env
 #   Usage:
-#       ./install
+#       ./chroot
 #   Arguments:
 #        None
 #   Returns:
@@ -17,8 +17,8 @@
 #######################################
 main() {
     # Check if $USAGE is respected
-    readonly USAGE='Usage: ./install'
-    [ "$#" = 0 ] || { err "Error: 0 argument(s) expected, $# received"; err "$USAGE"; return 1; }
+    readonly USAGE='Usage: ./chroot'
+    [ "$#" -eq 0 ] || { err "Error: 0 argument(s) expected, $# received"; err "$USAGE"; return 1; }
 
     # Arguments
     readonly hostname="$(cat /etc/hostname)"
@@ -29,6 +29,11 @@ main() {
     locale_update
     packages_install
     aur_install
+    grub_install
+
+    # Copy post_install
+    mv /root/post_install "/home/$AI_USER_NAME"
+    chown "$AI_USER_NAME:$AI_USER_NAME" "/home/$AI_USER_NAME/post_install"
 }
 
 #######################################
@@ -54,24 +59,44 @@ user_create() {
 locale_update() {
     hwclock --systohc
 
-    [ ! -z "$AI_SYSTEM_KEYMAP" ] \
-        && localectl set-keymap "$AI_SYSTEM_KEYMAP" \
-        && localectl set-x11-keymap "$AI_SYSTEM_KEYMAP"
+    if [ -z "$AI_SYSTEM_KEYMAP" ]; then
+        localectl set-keymap "$AI_SYSTEM_KEYMAP"
+        localectl set-x11-keymap "$AI_SYSTEM_KEYMAP"
+    fi
 
     locale-gen
 }
-
 
 #######################################
 # Install packages
 #######################################
 packages_install() {
     pacman -Syu --needed \
-        git vim curl wget dash nano man-pages man-db \
+        git vim curl wget dash nano man-pages man-db xsv \
         dnsutils networkmanager networkmanager-openvpn \
         reflector os-prober grub efibootmgr \
         pipewire pipepiwe-alsa pipepiwe-pulse pipepiwe-jack \
+        mesa \
         $AI_SYSTEM_PACKAGES_EXTRA
+
+    # Enable NetworkManager
+    ln -s /usr/lib/systemd/system/NetworkManager.service /etc/systemd/system/multi-user.target.wants/NetworkManager.service
+    ln -s /usr/lib/systemd/system/NetworkManager-dispatcher.service /etc/systemd/system/dbus-org.freedesktop.nm-dispatcher.service
+    ln -s /usr/lib/systemd/system/NetworkManager-wait-online.service /etc/systemd/system/network-online.target.wants/NetworkManager-wait-online.service
+
+    # Enable optional services
+    for daemon in tlp bumblebee nftables; do
+        # Enable
+        sf="/usr/lib/systemd/system/$daemon.service"
+        [ ! -f "$sf" ] || ln -s "$sf" "/etc/systemd/system/$(cat "$sf" | grep WantedBy | cut -d'=' -f2).wants/$daemon.service"
+
+        # Add user to group
+        for group in "$daemon" "$daemon"d; do
+            if getent group | grep -q "$group"; then
+                gpasswd -a "$AI_USER_NAME" "$group"
+            fi
+        done
+    done
 
     # Configure sudo
     sed -i 's/#%wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/' /etc/sudoers
@@ -86,7 +111,7 @@ aur_install() {
     for package in paru-bin dashbinsh $AI_SYSTEM_PACKAGES_AUR_EXTRA; do
         su "$AI_USER_NAME" -c "\
             mkdir '$tmp/$package' \
-            && git clone 'https://aur.archlinux.org/$package.git/' \"$tmp/$package\" \
+            && git clone 'https://aur.archlinux.org/$package.git/' \"\$_\" \
             && cd \"\$_\" \
             && makepkg --noconfirm -s \
             "
@@ -95,6 +120,26 @@ aur_install() {
     done
 
     rm -rf "$tmp"
+}
+
+#######################################
+# Install GRUB bootloader
+#######################################
+grub_install() {
+    printf 'GRUB_GFXMODE=%s,auto\n' "$AI_GRUB_RESOLUTION" >> /etc/default/grub
+
+    # Enable theme
+    [ ! -d '/boot/esp/EFI/GRUB/themes/tela/' ] \
+        || printf 'GRUB_THEME="/boot/esp/EFI/GRUB/themes/tela/theme.txt"\n' >> /etc/default/grub
+
+    # Enable os-prober
+    grep -q 'GRUB_DISABLE_OS_PROBER=false' /etc/default/grub \
+        || printf 'GRUB_DISABLE_OS_PROBER=false\n' >> /etc/default/grub
+
+    # Install efishell (shellx64) and memtest86
+
+    grub-install --target=x86_64-efi --efi-directory=/boot/esp --bootloader-id=GRUB
+    grub-mkconfig -o /boot/grub/grub.cfg
 }
 
 #######################################

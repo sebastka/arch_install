@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e      # Abort upon error
 set -u      # Abort upon udefined variable
-set -x      # Print every command
+#set -x      # Print every command
 #set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
 
 #######################################
@@ -17,9 +17,9 @@ set -x      # Print every command
 #######################################
 main() {
     # Check if $USAGE is respected
-    readonly USAGE='Usage: ./setup_usb hostname dev'
-    [ "$#" -ne 1 ] && err "Error: 1 argument(s) expected, $# received" && err "$USAGE" && return 1
-    [ "$(id -u)" -eq 0 ] && err 'Error: Please do NOT run as root' && return 2
+    readonly USAGE='Usage: ./setup_usb dev'
+    [ "$#" -eq 1 ] || { err "Error: 1 argument(s) expected, $# received"; err "$USAGE"; return 1; }
+    [ "$(id -u)" -ne 0 ] || { err 'Error: Please do NOT run as root'; return 2; }
 
     # Parameters
     readonly dev="$1"
@@ -48,7 +48,7 @@ iso_fetch() {
 # Write iso to device
 iso_write() {
 	# Prepare USB device
-	sudo wipefs --all --force "$dev"
+	sudo wipefs --all --force "$dev" >/dev/null 2>&1
 	cat "$tmp/$latest" | sudo tee "$dev" >/dev/null
 	sync
 
