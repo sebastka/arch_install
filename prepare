@@ -2,7 +2,8 @@
 set -e     # Abort upon error
 set -u     # Abort upon udefined variable
 #set -x     # Print every command
-#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+readonly path="$(dirname `readlink -f "$0"`)"
 
 #######################################
 #   Description:
@@ -33,19 +34,16 @@ main() {
     arch-chroot /mnt sh /root/arch_install/chroot
 }
 
-#######################################
 # Load env
-#######################################
 load_env() {
     # Load general and specific .env
-    set -a; . env/env; set +a
-    set -a && . "env/$hostname.env" && set +a
+    set -a
+    . "$path/env/env"
+    . "$path/env/$hostname.env"
+    set +a
 }
 
-
-#######################################
 # Updates locales and generate
-#######################################
 locale_update() {
     # Keymap
     if [ ! -z "$AI_SYSTEM_KEYMAP" ]; then
@@ -68,7 +66,7 @@ locale_update() {
     # Continue if an alternative locale is provided
     [ ! -z "$AI_SYSTEM_LOCALES_EXTRA" ] || return 0
 
-    sed -i "s/#$AI_SYSTEM_LOCALES_EXTRA/$AI_SYSTEM_LOCALES_EXTRA/" /etc/locale.gen
+    sed -i "/#$AI_SYSTEM_LOCALES_EXTRA.UTF-8 UTF-8/s/^#//g" etc/locale.gen
     locale-gen
 
     for locale in LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION; do
@@ -76,9 +74,7 @@ locale_update() {
     done
 }
 
-#######################################
 # Install base system
-#######################################
 setup_base() {
     reflector $(for c in $AI_SYSTEM_MIRROR_COUNTRIES; do echo "--country $c"; done) --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
     pacman -Sy
@@ -90,9 +86,7 @@ setup_base() {
     vim /mnt/etc/hosts
 }
 
-#######################################
 # Copy files
-#######################################
 root_cp() {
     for file in \
         /etc/pacman.d/mirrorlist \
@@ -108,20 +102,19 @@ root_cp() {
     cp -af /root/arch_install/root/. /mnt
 }
 
-#######################################
-# Replace all placeholders in passed
-# files with AI_* values in env
-#######################################
+# Replace all placeholders
 env_replace() {
-    SUBST_VARS=''
-    printenv | sed 's;=.*;;' | grep "$PREFIX" | while read var; do
-        SUBST_VARS="$SUBST_VARS$var "
-    done
+    printf '\nSubstituting variables\n'
+
+    # Get all vars' name from .env
+    SUBST_VARS="$(printenv | sed 's/=.*//' | grep "^$PREFIX" | sed "s/$PREFIX/\$$PREFIX/" | tr '\n' ',')"
 
     find /root/arch_install/root/ -type f | while read f; do
-        envsubst "$(printf '${%s} ' $SUBST_VARS)" \
+        dest_file="/mtn/$(echo "$f" | cut -d'/' -f5-)"
+
+        envsubst "$SUBST_VARS" \
             < "$f" \
-            > "/mtn/$(echo "$f" | cut -d'/' -f5-)"
+            > "$dest_file"
     done
 }
 

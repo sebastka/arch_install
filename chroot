@@ -2,7 +2,8 @@
 set -e     # Abort upon error
 set -u     # Abort upon udefined variable
 #set -x     # Print every command
-#set -o pipefail # Prevents errors in a pipeline from being masked (not supported by dash yet)
+
+readonly path="$(dirname `readlink -f "$0"`)"
 
 #######################################
 #   Description:
@@ -22,7 +23,7 @@ main() {
 
     # Arguments
     readonly hostname="$(cat /etc/hostname)"
-    [ -f "env/$hostname.env" ] || { err "Error: no env file was found for '$hostname'"; return 2; }
+    [ -f "$path/env/$hostname.env" ] || { err "Error: no env file was found for '$hostname'"; return 2; }
 
     load_env
     user_create
@@ -37,26 +38,22 @@ main() {
     chown "$AI_USER_NAME:$AI_USER_NAME" "/home/$AI_USER_NAME/post_install"
 }
 
-#######################################
 # Load env
-#######################################
 load_env() {
     # Load general and specific .env
-    set -a; . env/env; set +a
-    set -a && . "env/$hostname.env" && set +a
+    set -a
+    . "$path/env/env"
+    . "$path/env/$hostname.env"
+    set +a
 }
 
-#######################################
 # Create unprivileged user
-#######################################
 user_create() {
     useradd -m -G wheel -s /bin/bash "$AI_USER_NAME"
     passwd "$AI_USER_NAME"
 }
 
-#######################################
 # Updates locales and generate
-#######################################
 locale_update() {
     hwclock --systohc
 
@@ -68,12 +65,10 @@ locale_update() {
     locale-gen
 }
 
-#######################################
 # Install packages
-#######################################
 packages_install() {
     pacman -Syu --needed \
-        git vim curl wget dash nano man-pages man-db xsv \
+        sudo git vim curl wget dash nano man-pages man-db xsv \
         htop dnsutils networkmanager networkmanager-openvpn \
         reflector os-prober grub efibootmgr \
         pipewire pipepiwe-alsa pipepiwe-pulse pipepiwe-jack pamixer pulsemixer \
@@ -102,29 +97,7 @@ packages_install() {
     sed -i 's/#%wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/' /etc/sudoers
 }
 
-#######################################
-# Install pkg from AUR
-#######################################
-aur_install() {
-    readonly tmp="$(mktemp -d)"
-
-    for package in $@; do
-        su "$AI_USER_NAME" -c "\
-            mkdir '$tmp/$package' \
-            && git clone 'https://aur.archlinux.org/$package.git/' \"\$_\" \
-            && cd \"\$_\" \
-            && makepkg --noconfirm -s \
-            "
-
-        pacman --noconfirm -U "$tmp/$package"/*.pkg.tar.xz
-    done
-
-    rm -rf "$tmp"
-}
-
-#######################################
 # Install X env
-#######################################
 x_install() {
     [ "$AI_USER_NAME" = true ] || return 0
 
@@ -140,9 +113,7 @@ x_install() {
     aur_install all-repository-fonts
 }
 
-#######################################
 # Install GRUB bootloader
-#######################################
 grub_install() {
     printf 'GRUB_GFXMODE=%s,auto\n' "$AI_GRUB_RESOLUTION" >> /etc/default/grub
 
@@ -158,6 +129,21 @@ grub_install() {
 
     grub-install --target=x86_64-efi --efi-directory=/boot/esp --bootloader-id=GRUB
     grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+# Install from AUR
+aur_install() {
+    su "$AI_USER_NAME" -c 'mkdir -p /tmp/aur'
+
+    for package in $@; do
+        git clone "https://aur.archlinux.org/$package.git/" "/tmp/aur/$package"
+        chown -R "$AI_USER_NAME:$AI_USER_NAME" /tmp/aur/
+
+        su "$AI_USER_NAME" -c "cd '/tmp/aur/$package/' && makepkg --noconfirm -s"
+        pacman --noconfirm -U "/tmp/aur/$package"/*.pkg.tar.xz
+    done
+
+    rm -rf "/tmp/aur"
 }
 
 #######################################
