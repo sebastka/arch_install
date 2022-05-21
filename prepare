@@ -23,7 +23,7 @@ main() {
 
     # Arguments
     readonly hostname="$1"
-    [ -f "env/$hostname.env" ] || { err "Error: no env file was found for hostname '$hostname'"; return 2; }
+    [ -f "$path/env/$hostname.env" ] || { err "Error: no env file was found for hostname '$hostname'"; return 2; }
 
     load_env
     locale_update
