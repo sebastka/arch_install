@@ -69,7 +69,7 @@ locale_update() {
 packages_install() {
     pacman -Syu --needed \
         sudo git vim curl wget dash nano man-pages man-db xsv \
-        htop dnsutils networkmanager networkmanager-openvpn \
+        htop dnsutils inetutils networkmanager networkmanager-openvpn \
         reflector os-prober grub efibootmgr \
         pipewire pipepiwe-alsa pipepiwe-pulse pipepiwe-jack pamixer pulsemixer \
         $AI_SYSTEM_PACKAGES_EXTRA
